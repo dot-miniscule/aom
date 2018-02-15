@@ -904,3 +904,6 @@ Proposed name          | Pros                                                   
 `AccessibleElement`    | Very explicit                                             | Even longer; confusing (are other `Element`s not accessible?)
 `AccessibilityNode`    | Very explicit                                             | Extremely long; nobody on the planet can type 'accessibility' correctly first try
 `AccessibilityElement` | Very explicit                                             | Ludicrously long; still requires typing 'accessibility'
+<!--stackedit_data:
+eyJoaXN0b3J5IjpbLTM4Mjc5MTc1NV19
+-->
