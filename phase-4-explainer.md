@@ -1,9 +1,24 @@
-### Phase 4: Full Introspection of an Accessibility Tree
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**
+
+- [Phase 4: Full Introspection of an Accessibility Tree](#phase-4-full-introspection-of-an-accessibility-tree)
+  - [ComputedAccessibleNode](#computedaccessiblenode)
+  - [Accessibility Tree Snapshots](#accessibility-tree-snapshots)
+  - [Open Questions](#open-questions)
+    - [1. Accessible Properties](#1-accessible-properties)
+    - [2. Rejection Case](#2-rejection-case)
+    - [3. Traversing across Accessible Trees](#3-traversing-across-accessible-trees)
+    - [4. Non-dom Nodes](#4-non-dom-nodes)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
+# Phase 4: Full Introspection of an Accessibility Tree
 
 The **Computed Accessibility Tree** API will allow authors to access
 the full computed accessibility tree -
 all computed properties for the accessibility node associated with each DOM element,
-plus the ability to walk the computed tree structure including virtual nodes.
+plus the ability to walk the computed tree structure including [virtual nodes](explainer.md#phase-3-virtual-accessibility-nodes), and [potentially non-DOM nodes, such as ::before content](#4-non-dom-nodes).
 
 This will make it possible to:
   * write any programmatic test which asserts anything
@@ -21,43 +36,17 @@ This will make it possible to:
   * react to accessibility tree state,
     for example, detecting the exposed role of an element
     and modifying the accessible help text to suit.
+  * Perform console debugging of accessibility properties.
 
-#### Why is accessing the computed properties being addressed last?
+For earlier exploration of this API, see the rest of the [explainer](explainer.md)
 
-**Consistency**
-Currently, the accessibility tree is not standardized between browsers:
-Each implements accessibility tree computation slightly differently.
-In order for this API to be useful,
-it needs to work consistently across browsers,
-so that developers don't need to write special case code for each.
-
-We want to take the appropriate time to ensure we can agree
-on the details for how the tree should be computed
-and represented.
-
-**Performance**
-Computing the value of many accessible properties requires layout.
-Allowing web authors to query the computed value of an accessible property
-synchronously via a simple property access
-would introduce confusing performance bottlenecks.
-
-We will likely want to create an asynchronous mechanism for this reason,
-meaning that it will not be part of the `accessibleNode` interface.
-
-**User experience**
-Compared to the previous three phases,
-accessing the computed accessibility tree will have the least direct impact on users.
-In the spirit of the [Priority of Constituencies](https://www.w3.org/TR/html-design-principles/#priority-of-constituencies),
-it makes sense to tackle this work last.
-
-
-#### ComputedAccessibleNode
+## ComputedAccessibleNode
 It is currently possible to check accessible attributes for a DOM element by using the `getAttribute` method:
 ```js
 element.hasAttribute("aria-labelledby");
 element.getAttribute("aria-labelledby");
 ```
-However, determining which accessible properties apply to an element can be cumbersome, as there can be multiple
+However, determining which accessible properties apply to an element can be cumbersome, as there can be multiple sources for an accessible property, similar to a style calculation (for example, see [WAI-ARIA name calculation](https://www.w3.org/TR/wai-aria-1.1/#namecalculation)).
 Accessing the computed accessible properties of a DOM element will be designed to mimic the behaviour of `getComputedStyle()`, but implemented as an asynchronous Promise-based API. A `ComputedAccessibleNode` can be requested for a specific element from the window:
 
 ```html
@@ -74,22 +63,26 @@ window.getComputedAccessibleNode(element).then(
   });
 ```
 
-The rejection case of the `Promise` is discussed in [Open Questions](#open-questions-rejection-case). Alternatively, we can use `await`:
+The rejection case of the `Promise` is discussed in [Open Questions](#2-rejection-case). Alternatively, we can use `await`:
 
 ```js
 var computedAccessibleNode = await window.getComputedAccessibleNode(element);
 console.log(computedAccessibleNode.role);  // "button".
 ```
-We can now access all of the computed properties exposed from one object, without relying on a leaky abstraction. This is distinct from [Phase 1](#phase-1-modifying-accessible-properties) as it would return the computed role, `"button"`, rather than `null`.  Exactly what properties a `ComputedAccessibleNode` should expose is discussed in in [Open Questions](#open-questions-accessible-properties).
+We can now access all of the computed properties exposed from one object, without relying on a leaky abstraction.
 
-#### Accessibility Tree Snapshots
+This is distinct from [Phase 1](#phase-1-modifying-accessible-properties) as it would return the computed role, `"button"`, rather than `null`.  Exactly what properties a `ComputedAccessibleNode` should expose is discussed in in [Open Questions](#1-accessible-properties).
+
+## Accessibility Tree Snapshots
 `ComputedAccessibleNode`s should represent a consistent snapshot of the Accessibility Tree.
 
-#### Open Questions
+## Open Questions
 There are a number of open questions about Phase 4 that need to be discussed. This list is by no means exhaustive, but should provide a good platform for beginning discussion on the specifics of the public API design.
 
-##### 1. Accessible Properties
-The first question to answer is what properties are we expecting to expose via this API, and how? A lot of the properties are fairly self explanatory, such as `role` and `name` returning a string, or `colCount` returning an integer etc. Other attributes are not so straightforward, such as `checked`. DOM elements expose a `checked` property on all input types, which can take either of the values `true` or `false`. . Other attributes are not so straightforward, such as `checked`. Although checkboxes can only be in one of two states, checked or unchecked upon a form submission, they can take on a third visual state - `indeterminate`.
+### 1. Accessible Properties
+The first question to answer is what properties are we expecting to expose via this API, and how? A lot of the properties are fairly self explanatory, such as `role` and `name` returning a string, or `colCount` returning an integer etc. Other attributes are not so straightforward, such as `checked`.
+
+DOM elements expose a `checked` property on all input types, which can take either of the values `true` or `false`. Although checkboxes can only be in one of two states, checked or unchecked upon a form submission, they can take on a third visual state - `indeterminate`.
 
 ```html
 <input type="checkbox" id="someCheckbox"/>
@@ -106,7 +99,7 @@ console.log(checked.checked)  // false
 consoel.log(checked.indeterminate)  // true
 ```
 
-ARIA reflects these states by allowing an author to set the checked state with `aria-checked`, assigning it to a string value of either `true`, `false`, or `mixed` (the latter reflecting the indeterminate state). This mixed checked state can be used to indicate that a parent checkbox has some nested child checkboxes that are a combination of `checked` and `unchecked`. What should a `ComputedAccessibleNode` expose these three visual states? However, as a checkbox cannot be submitted with a value of `mixed` or `indeterminate` should this be stored in a separate attribute? Three possible options are:
+ARIA reflects these states by allowing an author to set the checked state with `aria-checked`, assigning it to a string value of either `true`, `false`, or `mixed` (the latter reflecting the indeterminate state). This mixed checked state can be used to indicate that a parent checkbox has some nested child checkboxes that are a combination of `checked` and `unchecked`. How should a `ComputedAccessibleNode` expose these three visual states? As a checkbox cannot be submitted with a value of `mixed` or `indeterminate` should the indeterminate state be stored in a separate attribute as it is on the DOM Element? Three possible options are:
 1. Mimic `aria-checked`and return a string indicating which state the element is in.
 2. Expose an enum for each state.
 3. Implement the `checked` attribute as a boolean, with a separate boolean attribute for `mixed`/`indeterminate`.
@@ -154,22 +147,19 @@ interface ComputedAccessibleNode {
 };
 ```
 
-A full list of available attributes can be found [on this trix]() (aboxhall@: should this list be migrated somewhere it can be viewed externally? Putting it into the explainer seems wrong, should it be uploaded as a separate markdown or filed into an issue on the wicg page once the explainer is updated there?).
+TODO(meredithl): insert link to full list of potential properties in spec.
 
 
-##### 2. Rejection Case
+### 2. Rejection Case
 If we are returning a promise when requesting a `ComputedAccessibleNode`, what is the rejection case?
 
-##### 3. Lifecycle of the Accessible Tree
-`ComputedAccessibleNode`s within the same Frame all share a reference to the same tree snapshot, which means the tree is created when the first node is requested, and is destroyed with the Frame. One alternative is to queue up a number of requests for `ComputedAccessibleNode`s somewhere (returning a pending `Promise` to the callee), and when the next layout/style recalc is performed, resolve any outstanding `Promise`s. Computing the tree lazily would allow for batch retrieval of `ComputedAccessibleNode`s but care would have to be taken the ensure the idea of a consistent snapshot is maintained.
-
-##### 4. Accessibility Setting
-The Accessibility setting must be enabled for Phase 4. The current proposed implementation forces this when a `ComputedAccessibleNode` is requested, and does not ever switch it off, which may not be the best option in the long term. The lifecycle of Phase 4 from the first request of a `ComputedAccessibleNode`
-
-##### 5. Traversing across Accessible Trees
+### 3. Traversing across Accessible Trees
 Currently Phase 4 is proposed as containing `ComputedAccessibleNode`s within a single Frame, but in future the capability to explore from one Accessible Tree in one Frame to another.
 - TODO: Use cases for this?
 - Considerations? How to get from one "root" to "another"?
   - What is the relation between Frame roots? Siblings?
   - What owns each Frame? roots of tree's in different frame?
   - Is each tree still owned by the frame?
+
+### 4. Non-dom Nodes
+We may want the ability to traverse to non-DOM nodes through the `ComputedAccessibleNode` API. For example, traversing to the root of a page, or to [virtual accessibility nodes](explainer.md#phase-3-virtual-accessibility-nodes).
