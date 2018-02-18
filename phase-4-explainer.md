@@ -3,6 +3,7 @@
 **Table of Contents**
 
 - [Phase 4: Full Introspection of an Accessibility Tree](#phase-4-full-introspection-of-an-accessibility-tree)
+  - [Motivation](#motivation)
   - [ComputedAccessibleNode](#computedaccessiblenode)
   - [Accessibility Tree Snapshots](#accessibility-tree-snapshots)
   - [Open Questions](#open-questions)
@@ -40,13 +41,15 @@ This will make it possible to:
 
 For earlier exploration of this API, see the rest of the [explainer](explainer.md)
 
-## ComputedAccessibleNode
+## Motivation
 It is currently possible to check accessible attributes for a DOM element by using the `getAttribute` method:
 ```js
 element.hasAttribute("aria-labelledby");
 element.getAttribute("aria-labelledby");
 ```
-However, determining which accessible properties apply to an element can be cumbersome, as there can be multiple sources for an accessible property, similar to a style calculation (for example, see [WAI-ARIA name calculation](https://www.w3.org/TR/wai-aria-1.1/#namecalculation)).
+However, determining which accessible properties apply to an element can be cumbersome, as there can be multiple sources for an accessible property, for example see [WAI-ARIA name calculation](https://www.w3.org/TR/wai-aria-1.1/#namecalculation)). This means that if an author wants to write accessibility tests, they would need to be familiar with how accessible properties are calculated. This API would abstract away the implementation details from what the final computed accessible properties of an element or page are.
+
+## ComputedAccessibleNode
 Accessing the computed accessible properties of a DOM element will be designed to mimic the behaviour of `getComputedStyle()`, but implemented as an asynchronous Promise-based API. A `ComputedAccessibleNode` can be requested for a specific element from the window:
 
 ```html
