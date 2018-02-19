@@ -5,12 +5,13 @@
 - [Phase 4: Full Introspection of an Accessibility Tree](#phase-4-full-introspection-of-an-accessibility-tree)
   - [Motivation](#motivation)
   - [ComputedAccessibleNode](#computedaccessiblenode)
-  - [Accessibility Tree Snapshots](#accessibility-tree-snapshots)
+    - [`ensureUpToDate()`](#ensureuptodate)
   - [Open Questions](#open-questions)
     - [1. Accessible Properties](#1-accessible-properties)
     - [2. Rejection Case](#2-rejection-case)
     - [3. Traversing across Accessible Trees](#3-traversing-across-accessible-trees)
     - [4. Non-dom Nodes](#4-non-dom-nodes)
+    - [5. Updating ComputedAccessibleNodes](#5-updating-computedaccessiblenodes)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -76,8 +77,30 @@ We can now access all of the computed properties exposed from one object, withou
 
 This is distinct from [Phase 1](#phase-1-modifying-accessible-properties) as it would return the computed role, `"button"`, rather than `null`.  Exactly what properties a `ComputedAccessibleNode` should expose is discussed in in [Open Questions](#1-accessible-properties).
 
-## Accessibility Tree Snapshots
-`ComputedAccessibleNode`s should represent a consistent snapshot of the Accessibility Tree.
+### `ensureUpToDate()`
+One decision that needs to be made is what kind of guarantees are we able to make on how accurately a `ComputedAccessibleNode` is with the DOM content. For example:
+
+```html
+<div role=checkbox class="custom-checkbox" id="toggle"></div>
+```
+
+```js
+var element = document.getElementById("toggle");
+var computedAccessibleNode = window.getComputedAccessibleNode(element);
+element.setAttribute("checked", "true");
+console.log(computedAccessibleNode.checked);  // Should this be "true" or "false"?
+```
+
+One solution that provides is to expose a method that makes it the author's responsibility to update any `ComputedAccessibleNode`s they hold a reference to:
+
+```js
+computedAccessibleNode.ensureUpToDate();
+
+// Will print the most up to date value of the checked attribute.
+console.log(computedAccessibleNode.checked)
+```
+
+The trade-offs for this approach and other alternatives are discussed in [Open Questions](#5-updating-computedaccessiblenodes).
 
 ## Open Questions
 There are a number of open questions about Phase 4 that need to be discussed. This list is by no means exhaustive, but should provide a good platform for beginning discussion on the specifics of the public API design.
@@ -99,7 +122,7 @@ This is purely a visual state, meaning that it does not impact the value of the 
 
 ```js
 console.log(checked.checked)  // false
-consoel.log(checked.indeterminate)  // true
+console.log(checked.indeterminate)  // true
 ```
 
 ARIA reflects these states by allowing an author to set the checked state with `aria-checked`, assigning it to a string value of either `true`, `false`, or `mixed` (the latter reflecting the indeterminate state). This mixed checked state can be used to indicate that a parent checkbox has some nested child checkboxes that are a combination of `checked` and `unchecked`. How should a `ComputedAccessibleNode` expose these three visual states? As a checkbox cannot be submitted with a value of `mixed` or `indeterminate` should the indeterminate state be stored in a separate attribute as it is on the DOM Element? Three possible options are:
@@ -142,9 +165,9 @@ interface ComputedAccessibleNode {
     readonly attribute boolean? modal;
     readonly attribute boolean? readOnly;
 
-  readonly attribute float? valueNow;
-  readonly attribute float? valueMin;
-  readonly attribute float? valueMax;
+    readonly attribute float? valueNow;
+    readonly attribute float? valueMin;
+    readonly attribute float? valueMax;
 
     [CallWith=ScriptState] Promise ensureUpToDate();
 };
@@ -166,3 +189,6 @@ Currently Phase 4 is proposed as containing `ComputedAccessibleNode`s within a s
 
 ### 4. Non-dom Nodes
 We may want the ability to traverse to non-DOM nodes through the `ComputedAccessibleNode` API. For example, traversing to the root of a page, or to [virtual accessibility nodes](explainer.md#phase-3-virtual-accessibility-nodes).
+
+### 5. Updating ComputedAccessibleNodes
+TODO(meredithl)
