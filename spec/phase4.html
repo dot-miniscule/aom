@@ -132,6 +132,22 @@
         maintains a high degree of compatibility between browsers, without exposing any
         internal details and nuances.
       </p>
+      <section>
+        <h3>
+          Extensions to the <code>Window</code> interface
+        </h3>
+        <p>
+          The author can request a <i>computed accessible node</i> from the <code>Window</code>, supplying it with any valid [[!DOM]] <code>Element</code>.
+        </p>
+        <pre class="idl">
+          partial interface Window {
+            readonly attribute Promise<ComputedAccessibleNode> getComputedAccessibleNode(Element element);
+          }
+        </pre>
+        <p data-dfn-for="Window">
+          The <dfn>getComputedAccessibleNode()</dfn> method returns the <i>computed accessible node</i> associated with the supplied <code>DOM element</code> by way of a Javascript Promise.
+        </p>
+      </section>
     </section>
   </body>
 </html>
