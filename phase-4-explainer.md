@@ -88,7 +88,7 @@ One decision that needs to be made is what kind of guarantees are we able to mak
 var element = document.getElementById("toggle");
 var computedAccessibleNode = window.getComputedAccessibleNode(element);
 element.setAttribute("checked", "true");
-console.log(computedAccessibleNode.checked);  // Should this be "true" or "false"?
+console.log(computedAccessibleNode.checked);  // Will be false, but should it be?
 ```
 
 One solution that provides is to expose a method that makes it the author's responsibility to update any `ComputedAccessibleNode`s they hold a reference to:
@@ -97,7 +97,7 @@ One solution that provides is to expose a method that makes it the author's resp
 computedAccessibleNode.ensureUpToDate();
 
 // Will print the most up to date value of the checked attribute.
-console.log(computedAccessibleNode.checked)
+console.log(computedAccessibleNode.checked);  // true
 ```
 
 The trade-offs for this approach and other alternatives are discussed in [Open Questions](#5-updating-computedaccessiblenodes).
@@ -134,14 +134,11 @@ One thing that needs to be agreed upon is the full set of attributes that a `Com
 
 ```
 interface ComputedAccessibleNode {
-    readonly attribute DOMString? autocomplete;
-    readonly attribute DOMString? checked;
-    readonly attribute DOMString? keyShortcuts;
-    readonly attribute DOMString? name;
-    readonly attribute DOMString? placeholder;
-    readonly attribute DOMString? role;
-    readonly attribute DOMString? roleDescription;
-    readonly attribute DOMString? valueText;
+    readonly attribute boolean? atomic;
+    readonly attribute boolean? busy;
+    readonly attribute boolean? disabled;
+    readonly attribute boolean? modal;
+    readonly attribute boolean? readOnly;
 
     readonly attribute long? colCount;
     readonly attribute unsigned long? colIndex;
@@ -153,21 +150,24 @@ interface ComputedAccessibleNode {
     readonly attribute unsigned long? rowSpan;
     readonly attribute long? setSize;
 
+    readonly attribute float? valueNow;
+    readonly attribute float? valueMin;
+    readonly attribute float? valueMax;
+
+    readonly attribute DOMString? autocomplete;
+    readonly attribute DOMString? checked;
+    readonly attribute DOMString? keyShortcuts;
+    readonly attribute DOMString? name;
+    readonly attribute DOMString? placeholder;
+    readonly attribute DOMString? role;
+    readonly attribute DOMString? roleDescription;
+    readonly attribute DOMString? valueText;
+
     readonly attribute ComputedAccessibleNode? parent;
     readonly attribute ComputedAccessibleNode? firstChild;
     readonly attribute ComputedAccessibleNode? lastChild;
     readonly attribute ComputedAccessibleNode? previousSibling;
     readonly attribute ComputedAccessibleNode? nextSibling;
-
-    readonly attribute boolean? atomic;
-    readonly attribute boolean? busy;
-    readonly attribute boolean? disabled;
-    readonly attribute boolean? modal;
-    readonly attribute boolean? readOnly;
-
-    readonly attribute float? valueNow;
-    readonly attribute float? valueMin;
-    readonly attribute float? valueMax;
 
     [CallWith=ScriptState] Promise ensureUpToDate();
 };
@@ -191,4 +191,32 @@ Currently Phase 4 is proposed as containing `ComputedAccessibleNode`s within a s
 We may want the ability to traverse to non-DOM nodes through the `ComputedAccessibleNode` API. For example, traversing to the root of a page, or to [virtual accessibility nodes](explainer.md#phase-3-virtual-accessibility-nodes).
 
 ### 5. Updating ComputedAccessibleNodes
-TODO(meredithl)
+This section will discuss teh possibilities for when a `ComputedAccessibleNode` is considered "up to date", which is when it reflects the most recent changes in the DOM. Currently, `ComputedAccessibleNode` provides a manual method for refreshing itself, which can be called by the author when they know a change has been made. For example, an author could register a `MutationObserver` in order to be notified when DOM content has been changed:
+
+```html
+<div role=checkbox class="custom-checkbox" id="toggle"></div>
+```
+
+```js
+var element = document.getElementById("custom-checkbox");
+var computedAccessibleNode = await window.getComputedAccessibleNode(element);
+var mutationObserver = new MutationObserver(function(mutations) {
+  computedAccessibleNode.ensureUpToDate();
+})
+
+// Starts listening for changes in the root HTML element of the page.
+mutationObserver.observe(element, {
+    attributes: true,
+    characterData: true,
+    childList: true,
+    subtree: true,
+    attributeOldValue: true,
+    characterDataOldValue: true
+});
+
+mutationObserver.disconnect();
+```
+
+This means that any time the source element is updated (or any of its attributes by setting the `attributes` flag in the observer to `true`) the `ComputedAccessibleNode` will be refreshed to reflect the latest changes.
+
+Another option is to make `ComputedAccessibleNode` a live object, so that it is (almost) always up to date with DOM content, meaning that rather than a `ComputedAccessibleNode` belonging to a snapshot of the Accessibility Tree.
