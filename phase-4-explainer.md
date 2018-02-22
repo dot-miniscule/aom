@@ -88,7 +88,7 @@ One decision that needs to be made is what kind of guarantees are we able to mak
 var element = document.getElementById("toggle");
 var computedAccessibleNode = window.getComputedAccessibleNode(element);
 element.setAttribute("checked", "true");
-console.log(computedAccessibleNode.checked);  // Should this be "true" or "false"?
+console.log(computedAccessibleNode.checked);  // Will be "false", but should it be?
 ```
 
 One solution that provides is to expose a method that makes it the author's responsibility to update any `ComputedAccessibleNode`s they hold a reference to:
@@ -97,7 +97,7 @@ One solution that provides is to expose a method that makes it the author's resp
 computedAccessibleNode.ensureUpToDate();
 
 // Will print the most up to date value of the checked attribute.
-console.log(computedAccessibleNode.checked)
+console.log(computedAccessibleNode.checked);  // true
 ```
 
 The trade-offs for this approach and other alternatives are discussed in [Open Questions](#5-updating-computedaccessiblenodes).
@@ -134,14 +134,11 @@ One thing that needs to be agreed upon is the full set of attributes that a `Com
 
 ```
 interface ComputedAccessibleNode {
-    readonly attribute DOMString? autocomplete;
-    readonly attribute DOMString? checked;
-    readonly attribute DOMString? keyShortcuts;
-    readonly attribute DOMString? name;
-    readonly attribute DOMString? placeholder;
-    readonly attribute DOMString? role;
-    readonly attribute DOMString? roleDescription;
-    readonly attribute DOMString? valueText;
+    readonly attribute boolean? atomic;
+    readonly attribute boolean? busy;
+    readonly attribute boolean? disabled;
+    readonly attribute boolean? modal;
+    readonly attribute boolean? readOnly;
 
     readonly attribute long? colCount;
     readonly attribute unsigned long? colIndex;
@@ -153,42 +150,80 @@ interface ComputedAccessibleNode {
     readonly attribute unsigned long? rowSpan;
     readonly attribute long? setSize;
 
+    readonly attribute float? valueNow;
+    readonly attribute float? valueMin;
+    readonly attribute float? valueMax;
+
+    readonly attribute DOMString? autocomplete;
+    readonly attribute DOMString? checked;
+    readonly attribute DOMString? keyShortcuts;
+    readonly attribute DOMString? name;
+    readonly attribute DOMString? placeholder;
+    readonly attribute DOMString? role;
+    readonly attribute DOMString? roleDescription;
+    readonly attribute DOMString? valueText;
+
     readonly attribute ComputedAccessibleNode? parent;
     readonly attribute ComputedAccessibleNode? firstChild;
     readonly attribute ComputedAccessibleNode? lastChild;
     readonly attribute ComputedAccessibleNode? previousSibling;
     readonly attribute ComputedAccessibleNode? nextSibling;
 
-    readonly attribute boolean? atomic;
-    readonly attribute boolean? busy;
-    readonly attribute boolean? disabled;
-    readonly attribute boolean? modal;
-    readonly attribute boolean? readOnly;
-
-    readonly attribute float? valueNow;
-    readonly attribute float? valueMin;
-    readonly attribute float? valueMax;
-
     [CallWith=ScriptState] Promise ensureUpToDate();
 };
 ```
 
-TODO(meredithl): insert link to full list of potential properties in spec.
-
+See the [proposed Phase 4 Spec](spec/phase4.html) for a full list of properties available to be implemented.
 
 ### 2. Rejection Case
-If we are returning a promise when requesting a `ComputedAccessibleNode`, what is the rejection case?
+If we are returning a promise when requesting a `ComputedAccessibleNode`, what is the rejection case? What does it mean for a `ComputedAccessibleNode` to be rejected? This may be discovered as other open questions are answered.
 
 ### 3. Traversing across Accessible Trees
 Currently Phase 4 is proposed as containing `ComputedAccessibleNode`s within a single Frame, but in future the capability to explore from one Accessible Tree in one Frame to another.
-- TODO: Use cases for this?
-- Considerations? How to get from one "root" to "another"?
+- Considerations?
+  - How to get from one "root" to "another"?
   - What is the relation between Frame roots? Siblings?
-  - What owns each Frame? roots of tree's in different frame?
-  - Is each tree still owned by the frame?
 
 ### 4. Non-dom Nodes
-We may want the ability to traverse to non-DOM nodes through the `ComputedAccessibleNode` API. For example, traversing to the root of a page, or to [virtual accessibility nodes](explainer.md#phase-3-virtual-accessibility-nodes).
+We may want the ability to traverse to non-DOM nodes through the `ComputedAccessibleNode` API. How should `ComputedAccessibleNode`s fit into the notion of virtual nodes and Shadow DOM? A `ComputedAccessibleNode` can only be requested from the `Window` via an `Element`, but we may want to expose a way to traverse to `ComputedAccessibleNode`s for non-DOM nodes, such as pseudo-elements, or the root of the page. Tree walking should also be inclusive of [virtual accessibility nodes](explainer.md#phase-3-virtual-accessibility-nodes). Should `ComputedAccessibleNode`s allow us to traverse into Shadow-DOM? If so, should we be able to traverse into a closed Shadow-DOM? Is this a good candidate for the [rejection case](##2-rejection-case)?
 
 ### 5. Updating ComputedAccessibleNodes
-TODO(meredithl)
+This section will discuss the possibilities for when a `ComputedAccessibleNode` is considered "up to date", which is when it reflects the most recent changes in the DOM. Currently, `ComputedAccessibleNode` provides a manual method for refreshing itself, which can be called by the author when they know a change has been made.
+
+This means that any time the source element is updated (or any of its attributes by setting the `attributes` flag in the observer to `true`) the `ComputedAccessibleNode` will be refreshed to reflect the latest changes. However, this has a few caveats:
+1) When a new `ComputedAccessibleNode` is requested, all existing `ComputedAccessibleNode`s will be updated.
+2) When `ensureUpToDate()` is called on a `ComputedAccessibleNode`, all existing `ComputedAccessibleNode`s will be updated.
+
+In both of the above cases, this is because we choose to always *maintain a consistent snapshot* of the tree. The guarantees here are that when a node is requested, it (and implicitly all other nodes) will be up to date, and the same for when a node is manually updated with `ensureUpToDate()`.
+
+For example, an author could register a `MutationObserver` in order to be notified when DOM content has been changed:
+
+```html
+<div role=checkbox class="custom-checkbox" id="toggle"></div>
+```
+
+```js
+var element = document.getElementById("custom-checkbox");
+var computedAccessibleNode = await window.getComputedAccessibleNode(element);
+var mutationObserver = new MutationObserver(function(mutations) {
+  computedAccessibleNode.ensureUpToDate();
+})
+
+// Starts listening for changes in the root HTML element of the page.
+mutationObserver.observe(element, {
+    attributes: true,
+    characterData: true,
+    childList: true,
+    subtree: true,
+    attributeOldValue: true,
+    characterDataOldValue: true
+});
+
+mutationObserver.disconnect();
+```
+
+####What other options exist for updating `ComputedAccessibleNode`s?
+
+We could update periodically, so the guarantee is that properties on a node will be recently correct, but this unpredictability may make the API unsuitable for testing purposes, which is a core goal.
+
+We could update a node synchronously each time one of it's properties is updated, making it a live object. However, this would make the API very slow, albeit "correct".
