@@ -88,7 +88,7 @@ One decision that needs to be made is what kind of guarantees are we able to mak
 var element = document.getElementById("toggle");
 var computedAccessibleNode = window.getComputedAccessibleNode(element);
 element.setAttribute("checked", "true");
-console.log(computedAccessibleNode.checked);  // Will be false, but should it be?
+console.log(computedAccessibleNode.checked);  // Will be "false", but should it be?
 ```
 
 One solution that provides is to expose a method that makes it the author's responsibility to update any `ComputedAccessibleNode`s they hold a reference to:
@@ -220,3 +220,6 @@ mutationObserver.disconnect();
 This means that any time the source element is updated (or any of its attributes by setting the `attributes` flag in the observer to `true`) the `ComputedAccessibleNode` will be refreshed to reflect the latest changes.
 
 Another option is to make `ComputedAccessibleNode` a live object, so that it is (almost) always up to date with DOM content, meaning that rather than a `ComputedAccessibleNode` belonging to a snapshot of the Accessibility Tree.
+
+TODO(meredithl)
+
