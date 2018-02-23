@@ -12,6 +12,8 @@
     - [3. Traversing across Accessible Trees](#3-traversing-across-accessible-trees)
     - [4. Non-dom Nodes](#4-non-dom-nodes)
     - [5. Updating ComputedAccessibleNodes](#5-updating-computedaccessiblenodes)
+      - [Manual Refresh](#manual-refresh)
+      - [What other options exist for updating `ComputedAccessibleNode`s?](#what-other-options-exist-for-updating-computedaccessiblenodes)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -190,6 +192,7 @@ We may want the ability to traverse to non-DOM nodes through the `ComputedAccess
 ### 5. Updating ComputedAccessibleNodes
 This section will discuss the possibilities for when a `ComputedAccessibleNode` is considered "up to date", which is when it reflects the most recent changes in the DOM. Currently, `ComputedAccessibleNode` provides a manual method for refreshing itself, which can be called by the author when they know a change has been made.
 
+#### Manual Refresh
 This means that any time the source element is updated (or any of its attributes by setting the `attributes` flag in the observer to `true`) the `ComputedAccessibleNode` will be refreshed to reflect the latest changes. However, this has a few caveats:
 1) When a new `ComputedAccessibleNode` is requested, all existing `ComputedAccessibleNode`s will be updated.
 2) When `ensureUpToDate()` is called on a `ComputedAccessibleNode`, all existing `ComputedAccessibleNode`s will be updated.
@@ -222,7 +225,7 @@ mutationObserver.observe(element, {
 mutationObserver.disconnect();
 ```
 
-####What other options exist for updating `ComputedAccessibleNode`s?
+#### What other options exist for updating `ComputedAccessibleNode`s?
 
 We could update periodically, so the guarantee is that properties on a node will be recently correct, but this unpredictability may make the API unsuitable for testing purposes, which is a core goal.
 
