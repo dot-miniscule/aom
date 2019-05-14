@@ -11,44 +11,708 @@
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 **Table of Contents**
 
-- [Introduction](#introduction)
-- [Background: assistive technology and the accessibility tree](#background-assistive-technology-and-the-accessibility-tree)
-  - [Accessibility node properties](#accessibility-node-properties)
-- [DOM tree, accessibility tree and platform accessibility APIs](#dom-tree-accessibility-tree-and-platform-accessibility-apis)
-  - [Mapping native HTML to the accessibility tree](#mapping-native-html-to-the-accessibility-tree)
-  - [ARIA](#aria)
-- [Gaps in the web platform's accessibility story](#gaps-in-the-web-platforms-accessibility-story)
-- [The Accessibility Object Model](#the-accessibility-object-model)
-  - [Phase 1: Modifying Accessible Properties](#phase-1-modifying-accessible-properties)
-    - [Use cases for Accessible Properties](#use-cases-for-accessible-properties)
-    - [AOM and ARIA](#aom-and-aria)
-      - [No reflection](#no-reflection)
-      - [AOM takes precedence](#aom-takes-precedence)
-      - [Reasoning](#reasoning)
-    - [Computed accessible properties](#computed-accessible-properties)
-    - [Strong typing](#strong-typing)
-  - [Phase 2: Accessible Actions](#phase-2-accessible-actions)
-  - [Phase 3: Virtual Accessibility Nodes](#phase-3-virtual-accessibility-nodes)
-  - [Phase 4: Full Introspection of an Accessibility Tree](#phase-4-full-introspection-of-an-accessibility-tree)
-    - [Why is accessing the computed properties being addressed last?](#why-is-accessing-the-computed-properties-being-addressed-last)
-  - [Phases: Summary](#phases-summary)
-  - [Audience for the proposed API](#audience-for-the-proposed-api)
-- [Next Steps](#next-steps)
-  - [Incubation](#incubation)
-- [Additional thanks](#additional-thanks)
-- [Appendix: `AccessibleNode` naming](#appendix-accessiblenode-naming)
+  - [Introduction](#introduction)
+  - [Motivating use cases](#motivating-use-cases)
+  - [The Accessibility Object Model](#the-accessibility-object-model)
+    - [Reflecting ARIA attributes](#reflecting-aria-attributes)
+    - [Reflecting Element references](#reflecting-element-references)
+      - [Use case 2: Setting relationship properties without needing to use IDREFs](#use-case-2-setting-relationship-properties-without-needing-to-use-idrefs)
+    - [Custom Elements APIs](#custom-elements-apis)
+      - [Use case 1: Setting non-reflected (“default”) accessibility properties for Web Components](#use-case-1-setting-non-reflected-default-accessibility-properties-for-web-components)
+        - [Default semantics via customElements.define()](#default-semantics-via-customelementsdefine)
+        - [Per-instance, dynamic semantics via the `createdCallback()` reaction](#per-instance-dynamic-semantics-via-the-createdcallback-reaction)
+    - [User action events from Assistive Technology](#user-action-events-from-assistive-technology)
+      - [New InputEvent types](#new-inputevent-types)
+      - [Use case 3: Listening for events from Assistive Technology](#use-case-3-listening-for-events-from-assistive-technology)
+    - [Virtual Accessibility Nodes](#virtual-accessibility-nodes)
+      - [Use case 4: Adding non-DOM nodes (“virtual nodes”) to the Accessibility tree](#use-case-4-adding-non-dom-nodes-virtual-nodes-to-the-accessibility-tree)
+    - [Full Introspection of an Accessibility Tree - `ComputedAccessibleNode`](#full-introspection-of-an-accessibility-tree---computedaccessiblenode)
+      - [Use case 5:  Introspecting the computed tree](#use-case-5--introspecting-the-computed-tree)
+      - [Why is accessing the computed properties being addressed last?](#why-is-accessing-the-computed-properties-being-addressed-last)
+    - [Audience for the proposed API](#audience-for-the-proposed-api)
+    - [What happened to `AccessibleNode`?](#what-happened-to-accessiblenode)
+  - [Next Steps](#next-steps)
+    - [Incubation](#incubation)
+  - [Additional thanks](#additional-thanks)
+- [Appendices](#appendices)
+  - [Background: assistive technology and the accessibility tree](#background-assistive-technology-and-the-accessibility-tree)
+    - [Accessibility node properties](#accessibility-node-properties)
+  - [Background: DOM tree, accessibility tree and platform accessibility APIs](#background-dom-tree-accessibility-tree-and-platform-accessibility-apis)
+    - [Mapping native HTML to the accessibility tree](#mapping-native-html-to-the-accessibility-tree)
+    - [ARIA](#aria)
+  - [Appendix: `AccessibleNode` naming](#appendix-accessiblenode-naming)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ## Introduction
 
-This effort aims to create a JavaScript API
-to allow developers to modify (and eventually explore) the accessibility tree
-for an HTML page.
+This effort aims to develop additions to the web platform
+to allow developers to provide information to assistive technology APIs,
+and to understand what information browsers provide to those APIs.
 
-If you're already familiar with the accessibility tree and ARIA,
-[The Accessibility Object Model](#the-accessibility-object-model)
-section is the discussion of the actual proposal.
+## Motivating use cases
+
+(More background on existing APIs can be found in the [Appendices](#appendices).)
+
+Web apps that push the boundaries of what's possible on the web struggle to make them accessible
+because the APIs aren't yet sufficient -
+in particular, they are much less expressive than the native APIs that the browser communicates with.
+
+1. Setting non-reflected (“default”) accessibility properties for [Web Components](https://developer.mozilla.org/en-US/docs/Web/Web_Components) which can be overridden by page authors
+    - Currently, Web Components are forced to use ARIA to declare their default semantics.
+    This causes ARIA attributes which are really implementation details 
+    to "leak" into the DOM. 
+    - This capability _need not_, but _may_ be limited to Web Components.
+2.  Setting [relationship properties](https://www.w3.org/TR/wai-aria-1.1/#attrs_relationships) without needing to use IDREFs
+    - Currently, to specify any ARIA relationship,
+     an author must specify a unique ID on any element which may be the target
+     of the relationship.
+    - In the case of something like 
+    [`aria-activedescendant`](https://www.w3.org/TR/wai-aria-1.1/#aria-activedescendant),
+    this may be one of hundreds or thousands of elements, 
+    depending on the UI.
+    This requirement makes these APIs cumbersome to use
+    and lead to many extra DOM attributes being necessary.
+3. Listening for events from Assistive Technology
+   - Currently, _only_ built-in elements have the capability to react to events,
+     typically triggered by user actions such as 
+     ["simulated click"](https://developer.android.com/reference/android/view/accessibility/AccessibilityEvent.html#TYPE_VIEW_CLICKED) 
+     or ["increment"](https://developer.apple.com/documentation/objectivec/nsobject/1615076-accessibilityincrement).
+4. Adding non-DOM nodes (“virtual nodes”) to the Accessibility tree 
+   - For example, to express a complex UI built out of a `<canvas>` element,
+     or streaming a remote desktop to a `<video>` element, etc.
+   - These should be able to express at least the same set of accessible properties as Elements, 
+     as well as parent/child/other relationships with other virtual nodes, 
+     and position/dimensions.
+5. Introspecting the computed accessibility tree
+   - Developers currently have no way to probe or test how ARIA and other accessible properties are applied.
+
+## The Accessibility Object Model
+
+The Accessibility Object Model (AOM) is a set of changes to HTML and related standards
+to address the use cases above.
+
+(Note: If you were familiar with an earlier version of AOM,
+you might be wondering [what happened to `AccessibleNode`?](#what-happened-to-accessiblenode))
+
+### Reflecting ARIA attributes
+
+We will 
+[reflect](https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#reflect) 
+ARIA attributes on HTML elements.
+
+This is now a part of the [ARIA 1.2 spec](https://www.w3.org/TR/wai-aria-1.2/#idl-interface).
+
+```js
+el.role = "button";
+el.ariaPressed = "true";  // aria-pressed is a tristate attribute
+el.ariaDisabled = true;   // aria-disabled is a true/false attribute
+```
+
+### Reflecting Element references
+
+Straight reflection of ARIA properties 
+would reflect relationship attributes like `aria-labelledby` as strings:
+
+```js
+el.ariaDescribedBy = "id1";
+```
+
+results in
+```html
+<div aria-describedby="id1">
+```
+
+We propose augmenting this API with non-reflected properties 
+which take element references:
+
+```js
+el.ariaDescribedByElements = [labelElement1, labelElement2];
+el.ariaActiveDescendantElement = ownedElement1;
+```
+
+This would allow specifying semantic relationships between elements
+without the need to assign globally unique ID attributes to each element
+which participates in a relationship.
+
+Moreover, this would enable authors using open `ShadowRoot`s
+to specify relationships which cross over Shadow DOM boundaries.
+
+This API is being [proposed](https://github.com/whatwg/html/issues/3515)
+as a change to the WHATWG HTML spec.
+
+#### Use case 2: Setting relationship properties without needing to use IDREFs
+
+Today, an author attempting to express a relationship across Shadow DOM boundaries
+might attempt using `aria-activedescendant` like this:
+```html
+<custom-combobox>
+  #shadow-root (open)
+  |  <!-- this doesn't work! -->
+  |  <input aria-activedescendant="opt1"></input>
+  |  <slot></slot>
+  <custom-optionlist>
+    <x-option id="opt1">Option 1</x-option>
+    <x-option id="opt2">Option 2</x-option>
+    <x-option id='opt3'>Option 3</x-option>
+ </custom-optionlist>
+</custom-combobox>
+```
+
+This fails, because IDREFs are scoped within the shadowRoot
+or document context in which they appear.
+
+An author could specify this relationship programmatically instead:
+
+```js
+const input = comboBox.shadowRoot.querySelector("input");
+const optionList = comboBox.querySelector("custom-optionlist");
+input.activeDescendantElement = optionList.firstChild;
+```
+
+This would allow the relationship to be expressed naturally.
+
+This API is being discussed in [issue #3513](https://github.com/whatwg/html/issues/3515#issuecomment-413716944) 
+on the WHATWG HTML repository.
+
+### Custom Elements APIs
+
+We propose that Custom Element authors be able to provide static, default semantics
+via the `customElements.define()` options,
+and dynamic, per-element semantics via a configuration callback.
+
+#### Use case 1: Setting non-reflected (“default”) accessibility properties for Web Components
+
+Today, a library author creating a Web Component is forced to "sprout" ARIA attributes
+to express semantics which are implicit for native elements.
+
+```html
+<!-- Page author uses the custom elements as they would native elements -->
+<custom-tablist>
+  <custom-tab selected>Tab 1</custom-tab>
+  <custom-tab>Tab 2</custom-tab>
+  <custom-tab>Tab 3</custom-tab>
+</custom-tablist>
+
+<!-- Custom elements are forced to "sprout" extra attributes to express semantics -->
+<custom-tablist role="tablist">
+  <custom-tab selected role="tab" aria-selected="true" aria-controls="tabpanel-1">Tab 1</custom-tab>
+  <custom-tab role="tab" aria-controls="tabpanel-2">Tab 2</custom-tab>
+  <custom-tab role="tab" aria-controle="tabpanel-3">Tab 3</custom-tab>
+</custom-tablist>
+```
+
+##### Default semantics via customElements.define()
+
+Authors may provide immutable default semantics for a custom element
+by setting properties via the `ElementDefinitionOptions` object
+passed in to the `CustomElementRegistry.define()` method.
+
+The properties set on the `ElementDefinitionOptions` object
+become the default values to be used
+when mapping the custom element to an accessible object.
+
+Note: this is analogous to creating an "immutable class variable" -
+these semantic properties are associated with the custom element definition,
+not with each custom element instance.
+The semantics they define apply to *all* instances of the custom element.
+
+For example, an author creating a custom tab control may define three custom elements
+for the individual tabs, the tab list and the tab panel:
+
+```js
+class TabListElement extends HTMLElement { ... }
+customElements.define("custom-tablist", TabListElement,
+                      { role: "tablist", ariaOrientation: "horizontal" });
+
+class TabElement extends HTMLElement { ... }
+customElements.define("custom-tab", TabElement,
+                      { role: "tab" });
+
+class TabPanelElement extends HTMLElement { ... }
+customElements.define("custom-tabpanel", TabPanelElement,
+                      { role: "tabpanel" });
+```
+
+When a `<custom-tab>` element is mapped into the accessibility tree,
+by default it will have a mapped role of tab.
+
+This is analogous to how a `<button>` element is, by default,
+mapped to an accessible object with a role of button.
+
+##### Per-instance, dynamic semantics via the `ElementInternals` object
+
+This is being [discussed as part of the W3C Web Components project](https://github.com/w3c/webcomponents/issues/758).
+
+A custom element author may use the `ElementInternals`  object
+to modify the semantic state of an instance of a custom element
+in response to user interaction.
+
+The properties set on the `ElementInternals` object
+are used when mapping the element to an accessible object.
+
+Note: this is analogous to setting an "instance variable" -
+a copy of these semantic properties is created for each instance of the custom element.
+The semantics defined in each apply only to their associated custom element instance object.
+
+```js
+class CustomTab extends HTMLElement {
+  #internals = null;
+  #tablist = null;
+  #tabpanel = null;
+
+  constructor() {
+    super();
+    this.#internals = customElements.createInternals(this);
+    this.#internals.role = "tab";
+  }
+
+  // Observe the custom "active" attribute.
+  static get observedAttributes() { return ["active"]; }
+
+  connectedCallback() {
+    this.#tablist = this.parentElement;
+  }
+
+  setTabPanel(tabpanel) {
+    if (tabpanel.localName !== "custom-tabpanel" || tabPanel.id === "")
+      return;  // fail silently
+
+    this.#tabpanel = tabpanel;
+    tabpanel.setTab(this);
+    this.#internals.ariaControls = tabPanel;    // does not reflect
+  }
+
+  // ... setters/getters for custom properties which reflect to attributes
+
+  attributeChangedCallback(name, oldValue, newValue) {
+    switch(name) {
+      case "active":
+        let active = (newValue != null);
+        this.#tabpanel.shown = active;
+
+        // When the custom "active" attribute changes,
+        // keep the accessible "selected" state in sync.
+        this.#internals.ariaSelected = (newValue !== null);
+
+        if (selected)
+          this.#tablist.setSelectedTab(this);  // ensure no other tab has "active" set
+        break;
+    }
+  }
+}
+
+customElements.define("custom-tab", CustomTab, { role: "tab", needsElementInternals: true });
+```
+
+Authors using these elements may override the default semantics
+using ARIA attributes as normal.
+
+For example, an author may modify the appearance
+of a `<custom-tablist>` element to appear as a vertical list.
+They could add an `aria-orientation` attribute to indicate this,
+overriding the default semantics set in the custom element definition.
+
+```html
+<custom-tablist aria-orientation="vertical" class="vertical-tablist">
+  <custom-tab selected>Tab 1</custom-tab>
+  <custom-tab>Tab 2</custom-tab>
+  <custom-tab>Tab 3</custom-tab>
+</div>
+```
+
+Because the author-provided role overrides the default role,
+the <a>mapped</a> role will be based on the author-provided role in each case.
+
+If the author-provided semantics conflict with the Custom Element semantics,
+the author-provided semantics take precedence.
+
+### User action events from Assistive Technology
+
+To preserve the privacy of assistive technology users,
+events from assistive technology will typically cause a synthesised DOM event to be triggered:
+
+| **AT event**     | **Targets**                                                                        | **DOM event**                                                                   |
+|------------------|------------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
+| `click`          | *all elements*                                                                     | `click`                                                                         |
+| `focus`          | *all elements*                                                                     | `focus`                                                                         |
+| `select`         | Elements whose mapped role is `cell` or `option`                                   | `click`                                                                         |
+| `scrollIntoView` | (n/a)                                                                              | No event                                                                        |
+| `dismiss`        | *all elements*                                                                     | Keypress sequence for `Escape` key                                              |
+| `contextMenu`    | *all elements*                                                                     | `contextmenu`                                                                   |
+| `scrollByPage`   | *all elements*                                                                     | Keypress sequence for `PageUp` or `PageDown` key, depending on scroll direction |
+| `increment`      | Elements whose mapped role is `progressbar`, `scrollbar`, `slider` or `spinbutton` | Keypress sequence for `Up` key                                                  |
+| `decrement`      | Elements whose mapped role is `progressbar`, `scrollbar`, `slider` or `spinbutton` | Keypress sequence for `Down` key                                                |
+| `setValue`       | Elements whose mapped role is `combobox`,`scrollbar`,`slider` or `textbox`         | TBD                                                                             |
+
+#### New InputEvent types
+
+We will also add some new [`InputEvent`](https://www.w3.org/TR/uievents/#inputevent) types:
+
+* `increment`
+* `decrement`
+* `dismiss`
+* `scrollPageUp`
+* `scrollPageDown`
+
+These will be triggered via assistive technology events,
+along with the synthesised keyboard events listed in the above table,
+and also synthesised when the keyboard events listed above
+occur in the context of a valid target for the corresponding assistive technology event.
+
+For example,
+if a user not using assistive technology presses the `Escape` key in any context,
+an `input` event with a type of `dismiss` will be fired at the focused element
+along with the keypress sequence.
+
+If the same user pressed `Up` while page focus was on
+a `<input type="range">` *or* an element with a role of `slider`
+(either of which will have a computed role of `slider`),
+an `input` event with a type of `increment` will be fired at the focused element
+along with the keypress sequence.
+
+#### Use case 3: Listening for events from Assistive Technology
+
+For example:
+
+* A user may be using voice control software and they may speak the name of a
+  button somewhere in a web page.
+  The voice control software finds the button matching that name in the
+  accessibility tree and sends an *action* to the browser to click on that button.
+* That same user may then issue a voice command to scroll down by one page.
+  The voice control software finds the root element for the web page and sends
+  it the scroll *action*.
+* A mobile screen reader user may navigate to a slider, then perform a gesture to
+  increment a range-based control.
+  The screen reader sends the browser an increment *action* on the slider element
+  in the accessibility tree.
+
+Currently, browsers implement partial support for accessible actions 
+either by implementing built-in support for native HTML elements 
+(for example, a native HTML `<input type="range">` 
+already supports increment and decrement actions,
+and text boxes already support actions to set the value or insert text).
+
+However, there is no way for web authors to listen to accessible actions on
+custom elements.  
+For example, the 
+[custom slider above with a role of `slider`](#use-case-1-setting-non-reflected-default-accessibility-properties-for-web-components)
+prompts a suggestion on VoiceOver for iOS 
+to perform swipe gestures to increment or decrement, 
+but there is no way to handle that semantic event via any web API.
+
+Developers will be able to listen for keyboard events
+or input events to capture that semantic event.
+
+For example, to implement a custom slider,
+the author could handle the `Up` and `Down` key events
+as recommended in the [ARIA Authoring Practices guide](https://www.w3.org/TR/wai-aria-practices-1.1/#slider_kbd_interaction),
+and this would handle the assistive technology event as well.
+
+```js
+customSlider.addEventListener('keydown', (event) => {
+  switch (event.code) {
+  case "ArrowUp":
+    customSlider.value += 1;
+    return;
+  case "ArrowDown":
+    customSlider.value -= 1;
+    return;
+});
+```
+
+### Virtual Accessibility Nodes
+
+**Virtual Accessibility Nodes** will allow authors
+to expose "virtual" accessibility nodes,
+which are not associated directly with any particular DOM element,
+to assistive technology.
+
+This mechanism is often present in native accessibility APIs,
+in order to allow authors more granular control over the accessibility
+of custom-drawn APIs.
+
+```IDL
+// An AccessibleNode represents a virtual accessible node.
+interface AccessibleNode {
+    attribute DOMString? role;
+    attribute DOMString? name;
+    
+    attribute DOMString? autocomplete;
+    // ... all other ARIA-equivalent attributes
+
+    // Non-ARIA equivalent attributes necessary for virtual nodes only
+    attribute DOMString? offsetLeft;
+    attribute DOMString? offsetTop;
+    attribute DOMString? offsetWidth;
+    attribute DOMString? offsetHeight;
+    attribute AccessibleNode? offsetParent;
+
+    // Only affects accessible focus
+    boolean focusable;
+
+    // Tree walking
+    readonly attribute AccessibleNode? parent;
+    readonly attribute ComputedAccessibleNode? firstChild;
+    readonly attribute ComputedAccessibleNode? lastChild;
+    readonly attribute ComputedAccessibleNode? previousSibling;
+    readonly attribute ComputedAccessibleNode? nextSibling;
+
+    // Actions
+    void focus();
+
+    // Tree modification
+    AccessibleNode insertBefore(AccessibleNode node, Node? child);
+    AccessibleNode appendChild(AccessibleNode node);
+    AccessibleNode replaceChild(AccessibleNode node, AccessibleNode child);
+    AccessibleNode removeChild(AccessibleNode child);
+};
+
+```
+
+```idl
+partial interface Element {
+  AccessibleNode attachAccessibleRoot();
+}
+```
+
+- Calling `attachAccessibleRoot()` causes an `AccessibleNode` to be associated with a `Node`.
+  - The returned `AccessibleNode` forms the root of a virtual accessibility tree.
+  - The Node's DOM children are implicitly ignored for accessibility once an `AccessibleRoot` is attached - there is no mixing of DOM children and virtual accessible nodes.
+- Like `ShadowRoot`, an element may only have one associated `AccessibleRoot`.
+- Only `AccessibleNode`s may have `AccessibleNodes` as children, 
+  and `AccessibleNode`s may only have `AccessibleNode`s as children.
+
+#### Use case 4: Adding non-DOM nodes (“virtual nodes”) to the Accessibility tree 
+
+For example, to express a complex UI built out of a `<canvas>` element:
+
+```js
+// Implementing a canvas-based spreadsheet's semantics
+canvas.attachAccessibleRoot();
+let table = canvas.accessibleRoot.appendChild(new AccessibleNode());
+table.role = 'table';
+table.colCount = 10;
+table.rowcount = 100;
+let headerRow = table.appendChild(new AccessibleNode());
+headerRow.role = 'row';
+headerRow.rowindex = 0;
+// etc. etc.
+```
+
+Virtual nodes will typically need to have location and dimensions set explicitly:
+
+```js
+cell.offsetLeft = "30px";
+cell.offsetTop = "20px";
+cell.offsetWidth = "400px";
+cell.offsetHeight = "300px";
+cell.offsetParent = table;
+```
+
+If offsetParent is left unset, 
+the coordinates are interpreted relative to the accessible node's parent.
+
+To make a node focusable, the `focusable` attribute can be set. 
+This is similar to setting tabIndex=-1 on a DOM element.
+
+```js
+virtualNode.focusable = true;
+```
+
+Virtual accessible nodes are not focusable by default.
+
+Finally, to focus an accessible node, call its focus() method.
+
+```js
+virtualNode.focus();
+```
+
+When a virtual accessible node is focused, 
+input focus in the DOM is unchanged. 
+The focused accessible node is reported to assistive technology
+and other accessibility API clients, 
+but no DOM events are fired and document.activeElement is unchanged.
+
+When the focused DOM element changes, accessible focus follows it:
+the DOM element's associated accessible node gets focused.
+
+### Full Introspection of an Accessibility Tree - `ComputedAccessibleNode`
+
+```idl
+partial interface Window {
+  [NewObject] ComputedAccessibleNode getComputedAccessibleNode(Element el);
+}
+```
+
+```idl
+interface ComputedAccessibleNode {
+    // Same set of attributes as AccessibleNode, but read-only
+    readonly attribute DOMString? role;
+    readonly attribute DOMString? name;
+    
+    readonly attribute DOMString? autocomplete;
+    // ... all other ARIA-equivalent attributes
+
+    // Non-ARIA equivalent attributes
+    readonly attribute DOMString? offsetLeft;
+    readonly attribute DOMString? offsetTop;
+    readonly attribute DOMString? offsetWidth;
+    readonly attribute DOMString? offsetHeight;
+    readonly attribute AccessibleNode? offsetParent;
+    readonly boolean focusable;
+
+    readonly attribute AccessibleNode? parent;
+    readonly attribute ComputedAccessibleNode? firstChild;
+    readonly attribute ComputedAccessibleNode? lastChild;
+    readonly attribute ComputedAccessibleNode? previousSibling;
+    readonly attribute ComputedAccessibleNode? nextSibling;
+};
+
+```
+
+#### Use case 5:  Introspecting the computed tree
+
+The **Computed Accessibility Tree** API will allow authors to access
+the full computed accessibility tree -
+all computed properties for the accessibility node associated with each DOM element,
+plus the ability to walk the computed tree structure including virtual nodes.
+
+This will make it possible to:
+  * write any programmatic test which asserts anything
+    about the semantic properties of an element or a page.
+  * build a reliable browser-based assistive technology -
+    for example, a browser extension which uses the accessibility tree
+    to implement a screen reader, screen magnifier, or other assistive functionality;
+    or an in-page tool.
+  * detect whether an accessibility property
+    has been successfully applied
+    (via ARIA or otherwise)
+    to an element -
+    for example, to detect whether a browser has implemented a particular version of ARIA.
+  * do any kind of console-based debugging/checking of accessibility tree issues.
+  * react to accessibility tree state,
+    for example, detecting the exposed role of an element
+    and modifying the accessible help text to suit.
+
+#### Why is accessing the computed properties being addressed last?
+
+**Consistency**
+Currently, the accessibility tree is not standardized between browsers:
+Each implements accessibility tree computation slightly differently.
+In order for this API to be useful,
+it needs to work consistently across browsers,
+so that developers don't need to write special case code for each.
+
+We want to take the appropriate time to ensure we can agree
+on the details for how the tree should be computed
+and represented.
+
+**Performance**
+Computing the value of many accessible properties requires layout.
+Allowing web authors to query the computed value of an accessible property
+synchronously via a simple property access
+would introduce confusing performance bottlenecks.
+
+We will likely want to create an asynchronous mechanism for this reason,
+meaning that it will not be part of the `accessibleNode` interface.
+
+**User experience**
+Compared to the previous three phases,
+accessing the computed accessibility tree will have the least direct impact on users.
+In the spirit of the [Priority of Constituencies](https://www.w3.org/TR/html-design-principles/#priority-of-constituencies),
+it makes sense to tackle this work last.
+
+### Audience for the proposed API
+
+This API is will be primarily of interest to
+the relatively small number of developers who create and maintain
+the JavaScript frameworks and widget libraries that power the vast majority of web apps.
+Accessibility is a key goal of most of these frameworks and libraries,
+as they need to be usable in as broad a variety of contexts as possible.
+A low-level API would allow them to work around bugs and limitations
+and provide a clean high-level interface that "just works" 
+for the developers who use their components.
+
+This API is also aimed at developers of large flagship web apps that
+push the boundaries of the web platform. 
+These apps tend to have large development teams 
+who look for unique opportunities to improve performance 
+using low-level APIs like Canvas. 
+These development teams have the resources to make accessibility a priority too, 
+but existing APIs make it very cumbersome.
+
+### What happened to `AccessibleNode`?
+
+Initially, our intention was to combine these use cases into a read/write API
+analogous to the DOM,
+wherein each DOM `Element` would have an associated `AccessibleNode`
+allowing authors to read and write accessible properties.
+This was named the Accessibility Object Model,
+analogous to the Document Object Model.
+
+However, as discussions progressed it became clear that there were some issues with this model:
+- Computing the accessibility tree should not be necessary in order to modify it -
+getting an `AccessibleNode` to write to 
+should thus not depend on getting the computed properties.
+- Exposing the computed accessibility tree requires standardisation across browsers
+of how the tree is computed.
+- If we are not exposing computed properties on an `Element`'s `AccessibleNode`,
+it's unclear what the purpose of this object is beyond a "bag of properties".
+- Determining the order of precedence of ARIA properties
+and `AccessibleNode` properties did not have an obvious "correct" answer.
+- Similarly, using exclusively `AccessibleNode`s to express relationships was confusing.
+
+These issues prompted a reassessment, 
+and a simplification of the API based around the original set of use cases
+we were committed to addressing.
+
+## Next Steps
+
+The Accessibility Object Model development is led by a team of editors
+that represent several major browser vendors.
+
+Issues can be filed on GitHub:
+
+https://github.com/WICG/aom/issues
+
+### Incubation
+
+We intend to continue development of this spec as part of the
+[Web Platform Incubator Community Group (WICG)](https://www.w3.org/community/wicg/).
+Over time it may move into its own community group.
+
+Our intent is for this group's work to be almost entirely orthogonal to the
+current work of the [Web Accessibility Initiative](https://www.w3.org/WAI/)
+groups such as [ARIA](https://www.w3.org/TR/wai-aria/). While ARIA defines
+structural markup and semantics for accessibility properties on the web,
+often requiring coordination with assistive technology vendors and native platform
+APIs, the AOM simply provides a parallel JavaScript API that provides
+more low-level control for developers and fills in gaps in the web platform,
+but without introducing any new semantics.
+
+## Additional thanks
+
+Many thanks for valuable feedback, advice, and tools from:
+
+* Alex Russell
+* Bogdan Brinza
+* Chris Fleizach
+* Cynthia Shelley
+* David Bolter
+* Domenic Denicola
+* Elliott Sprehn
+* Ian Hickson
+* Joanmarie Diggs
+* Marcos Caceres
+* Nan Wang
+* Robin Berjon
+* Tess O'Connor
+
+Bogdan Brinza and Cynthia Shelley of Microsoft were credited as authors of an
+earlier draft of this spec but are no longer actively participating.
+
+# Appendices
 
 ## Background: assistive technology and the accessibility tree
 
@@ -143,7 +807,7 @@ These properties and actions are referred to as the *semantics* of a node.
 Each accessibility API expresses these concepts slightly differently,
 but they are all conceptually similar.
 
-##  DOM tree, accessibility tree and platform accessibility APIs
+##  Background: DOM tree, accessibility tree and platform accessibility APIs
 
 The web has rich support for making applications accessible,
 but only via a *declarative* API.
@@ -185,568 +849,17 @@ In either case there's a one-to-one correspondence
 between a DOM node and a node in the accessibility tree,
 and there is minimal fine-grained control over the semantics of the corresponding accessibility node.
 
-## Gaps in the web platform's accessibility story
-
-Web apps that push the boundaries of what's possible on the web struggle to make them accessible
-because the APIs aren't yet sufficient -
-in particular, they are much less expressive than the native APIs that the browser communicates with.
-
-In the description of each of the phases of the Accessibility Object Model
-spec below, we discuss specific gaps -
-things that currently can't be achieved using current web accessibility APIs,
-or can't be achieved without cumbersome workarounds.
-
-## The Accessibility Object Model
-
-This spec proposes the *Accessibility Object Model* (AOM).
-We plan to split this work into four phases,
-which will respectively allow authors to:
-
-1. modify the semantic properties of the accessibility node associated with a particular DOM node,
-3. directly respond to events (or actions) from assistive technology,
-3. create virtual accessibility nodes which are not directly associated with a DOM node, and
-4. programmatically explore the accessibility tree
-   and access the computed properties of accessibility nodes.
-
-In the following sections we'll outline each of these phases.
-
-### Phase 1: Modifying Accessible Properties
-
-This phase will explain and augment the existing capabilities of
-[ARIA](https://www.w3.org/TR/wai-aria-1.1/).
-
-Using ARIA, it's possible to override and add to the default semantic values for an element:
-
-```html
-<div role="checkbox" aria-checked="true">Receive promotional offers</div>
-```
-
-In this example,
-the [default role of a `<div>`](https://www.w3.org/TR/html-aam-1.0/#el-div),
-which would usually be assigned a grouping role or excluded from the accessibility tree,
-is overridden to give the accessibility node associated with this element
-a role of `checkbox`.
-
-Furthermore, the
-[default value of the accessible `checked` property](https://www.w3.org/TR/wai-aria/states_and_properties#aria-checked)
-is overridden to expose the element as a "checked checkbox".
-
-**The first phase of AOM, *Accessible Properties*,
-would create a different mechanism to achieve the same result:**
-
-```js
-el.accessibleNode.role = "checkbox";  // (See link below for naming concerns)
-el.accessibleNode.checked = true;
-```
-
-(There are some [notes on `accessibleNode` naming](#appendix-accessiblenode-naming).)
-
-
-#### Use cases for Accessible Properties
-
-Accessible Properties would avoid Custom Elements needing to "sprout" attributes in order to express their own semantics.
-
-Today, a library author creating a custom element is forced to "sprout" ARIA attributes
-to express semantics which are implicit for native elements.
-
-```html
-<!-- Page author uses the custom element as they would a native element -->
-<custom-slider min="0" max="5" value="3"></custom-slider>
-
-<!-- Custom element is forced to "sprout" extra attributes to express semantics -->
-<custom-slider min="0" max="5" value="3" role="slider"
-               tabindex="0" aria-valuemin="0" aria-valuemax="5"
-               aria-valuenow="3" aria-valuetext="3"></custom-slider>
-```
-
-Using AOM, a Custom Element author would be able to write a class declaration like this:
-
-```js
-class CustomCheckbox extends HTMLElement {
-  constructor() {
-    super();
-
-    // Apply a role of "checkbox" via the AOM
-    this.accessibleNode.role = "checkbox";
-  }
-
-  // Observe the custom "checked" attribute
-  static get observedAttributes() { return ["checked"]; }
-
-  // When the custom "checked" attribute changes,
-  // keep the accessible checked state in sync.
-  attributeChangedCallback(name, oldValue, newValue) {
-    switch(name) {
-    case "checked":
-      this.accessibleNode.checked = (newValue !== null);
-    }
-  }
-
-  connectedCallback() {
-    // When the custom checkbox is inserted in the page,
-    // ensure the checked state is in sync with the checked attribute.
-    this.accessibleNode.checked = this.hasAttribute("checked");
-  }
-}
-
-customElements.define("custom-checkbox", CustomCheckbox);
-```
-
-From the perspective of the embedding page, a custom checkbox would now
-have this clean HTML, with the accessibility fully encapsulated into
-the implementation rather than exposed as a leaky abstraction:
-
-```html
-<custom-checkbox checked>Receive promotional offers</custom-checkbox>
-```
-
-Furthermore, writing Accessible Properties would allow specifying accessible relationships without requiring IDREFs,
-as authors can now pass object references.
-Currently attributes like aria-describedby and aria-activedescendant
-take one or more IDREFs, like this:
-
-```html
-<div role="listbox" aria-describedby="id1 id2" aria-activedescendant="id3">
-```
-
-Accessible Properties would allow passing object references instead:
-
-```js
-el.accessibleNode.describedBy = [accessibleNode1, accessibleNode2];
-el.accessibleNode.activeDescendant = accessibleNode3;
-```
-
-Moreover, writing Accessible Properties would enable authors using Shadow DOM
-to specify relationships which cross over Shadow DOM boundaries.
-
-Today, an author attempting to express a relationship across Shadow DOM boundaries
-might attempt using `aria-activedescendant` like this:
-```html
-<custom-combobox>
-  #shadow-root
-  |  <!-- this doesn't work! -->
-  |  <input aria-activedescendant="opt1"></input>
-  |  <slot></slot>
-  <custom-optionlist>
-    <x-option id="opt1">Option 1</x-option>
-    <x-option id="opt2">Option 2</x-option>
-    <x-option id='opt3'>Option 3</x-option>
- </custom-optionlist>
-</custom-combobox>
-```
-
-This fails, because IDREFs are scoped within the shadowRoot
-or document context in which they appear.
-
-Using Accessible Properties,
-an author could specify this relationship programmatically instead:
-
-```js
-const input = comboBox.shadowRoot.querySelector("input");
-const optionList = comboBox.querySelector("custom-optionlist");
-input.accessibleNode.activeDescendant = optionList.accessibleNode;
-```
-
-This would allow the relationship to be expressed naturally.
-
-#### AOM and ARIA
-
-While AOM and ARIA both affect the computed accessible properties of a node,
-and have the same vocabulary,
-they are separate interfaces.
-
-##### No reflection
-
-ARIA does not reflect to AOM:
-
-```html
-<div id="clickBtn" role="button">Click here</div>
-```
-
-```js
-console.log(clickBtn.accessibleNode.role);   // null, not "button"
-```
-
-And AOM does not reflect to ARIA:
-
-```html
-clickBtn.accessibleNode.role = "link";
-
-console.log(clickBtn.getAttribute("role"));  // Still "button"
-```
-
-##### AOM takes precedence
-
-In the case where and AOM Accessible Property and the corresponding ARIA attribute have different values,
-the AOM property takes precedence.
-
-For example, in the case in the previous section,
-`clickBtn` would have a computed role of `"link"`
-even though its ARIA role is of `"button"`.
-
-##### Reasoning
-
-The reasons for these decisions are discussed in [#60](https://github.com/WICG/aom/issues/60), but in summary
-AOM is meant to be a superset of ARIA in terms of its capabilities, so
-it makes sense for AOM Accessible Properties to always supercede ARIA.
-Authors who wish to use AOM due to its greater expressiveness or
-smaller overhead (relative to setting a DOM attribute) won't have to
-worry about a DOM attribute overriding it.
-
-#### Computed accessible properties
-
-Accessible Properties explicitly **will not** allow authors to access
-the _computed_ accessible node properties corresponding to a given DOM node:
-
-```html
-<button id="composeBtn">Compose</button>
-```
-```js
-var composeBtn = document.getElementById('composeBtn');
-console.log(composeBtn.accessibleNode.role);  // null, not "button"
-console.log(composeBtn.accessibleNode.label);  // null, not "Compose"
-```
-
-This is analogous to the `style` attribute,
-which allows reading and setting an element's local style,
-while `getComputedStyle()` allows access to the full computed style.
-
-[Phase 4](#phase-4-full-introspection-of-an-accessibility-tree) will allow accessing the computed properties.
-
-#### Strong typing
-
-Accessible Properties provide no validation, but they are typed.
-For example, `AccessibleNode.disabled` is of type `boolean`,
-`AccessibleNode.valueNow` is of type `double`, and
-`AccessibleNode.colIndex` is of type `unsigned long`.
-As a result, trying to set one of these properties to a value
-of a different type will result in a standard JavaScript cast
-to the appropriate type.
-
-For a property of type `boolean`, any truthy value will result
-in the value `true`, and a falsy value will result in `false`:
-
-```
-element.accessibleNode.disabled = "yes";
-console.log(element.accessibleNode.disabled);  // true
-element.accessibleNode.disabled = "";
-console.log(element.accessibleNode.disabled);  // false
-```
-
-Similar rules apply to AccessibleNode properties of any other
-type; the standard JavaScript rules for type conversion apply.
-Note that all AccessibleNode properties are nullable, too:
-
-```
-element.accessibleNode.disabled = null;
-console.log(element.accessibleNode.disabled);  // null
-```
-
-When an AccessibleNode property is set to `null`, the corresponding
-ARIA attribute becomes relevant again, if set.
-
-### Phase 2: Accessible Actions
-
-**Accessible Actions** will allow authors to react to user input events coming from assistive technology.
-
-For example:
-
-* A user may be using voice control software and they may speak the name of a
-  button somewhere in a web page.
-  The voice control software finds the button matching that name in the
-  accessibility tree and sends an *action* to the browser to click on that button.
-* That same user may then issue a voice command to scroll down by one page.
-  The voice control software finds the root element for the web page and sends
-  it the scroll *action*.
-* A mobile screen reader user may navigate to a slider, then perform a gesture to
-  increment a range-based control.
-  The screen reader sends the browser an increment *action* on the slider element
-  in the accessibility tree.
-
-Currently, browsers implement partial support by accessible actions either by
-implementing built-in support for native HTML elements (for example, a native
-HTML `<input type="range">` already supports increment and decrement actions,
-and text boxes already support actions to set the value or insert text.
-
-However, there is no way for web authors to listen to accessible actions on
-custom elements.  For example, the custom slider above with a role of `slider`
-prompts a suggestion on VoiceOver for iOS to perform swipe gestures to increment
-or decrement, but there is no way to handle that semantic event via any web API.
-
-Accessible Actions gives web developers a mechanism to listen for accessible
-actions directly, by adding event listeners on an `AccessibleNode`.
-This is analogous to listening for user interaction events on a DOM node,
-except that the interaction event arrives via an assistive technology API,
-so it is directed to the accessible node first.
-
-For example, to implement a custom slider, the author could simply listen for
-`increment` and `decrement` events.
-
-```js
-customSlider.accessibleNode.addEventListener('increment', function() {
-  customSlider.value += 1;
-});
-customSlider.accessibleNode.addEventListener('decrement', function() {
-  customSlider.value -= 1;
-});
-```
-
-The supported actions would include:
-
-* `click`
-* `contextmenu`
-* `focus`
-* `setvalue`
-* `increment`
-* `decrement`
-* `select`
-* `scroll`
-* `dismiss`
-
-
-### Phase 3: Virtual Accessibility Nodes
-
-**Virtual Accessibility Nodes** will allow authors
-to expose "virtual" accessibility nodes,
-which are not associated directly with any particular DOM element,
-to assistive technology.
-
-This mechanism is often present in native accessibility APIs,
-in order to allow authors more granular control over the accessibility
-of custom-drawn APIs.
-
-On the web, this would allow creating an accessible solution to canvas-based UI
-which does not rely on fallback or visually-hidden DOM content.
-
-Constructing a node can be achieved simply by creating an `AccessibleNode`
-object directly rather than accessing one from a DOM element:
-
-```js
-var virtualNode = new AccessibleNode();
-virtualNode.role = "button";
-virtualNode.label = "Play Game";
-```
-
-To place the new virtual node in the accessibility tree, you can append
-a child to another `AccessibleNode`.
-
-```js
-document.body.accessibleNode.appendChild(virtualNode);
-```
-
-To limit the scope of changes possible by this API, `AccessibleNode.appendChild`
-is only allowed to append *virtual* accessible nodes. In other words, the
-accessibility tree for every web page will consist of the accessibility tree for
-the DOM first, and "hanging off" the accessible nodes for some of those DOM
-elements may be a subtree of virtual accessible nodes, but virtual accessible nodes
-may never have DOM accessible elements as children.
-
-A virtual node child may be removed with `removeChild`:
-
-```js
-document.body.accessibleNode.removeChild(virtualNode);
-```
-
-In addition, calling appendChild on a node that's already inserted somewhere else
-in the accessibility tree will implicitly remove it from its old location and
-append it to the new parent.
-
-Finally, the AOM also provides `insertChild` that's analogous to the DOM Node
-insertChild method, taking a zero-based index and then a child.
-
-A few additional properties are needed in order for virtual accessible nodes
-to be complete.
-
-To specify the location of a virtual accessible node on the screen, its
-left, top, width, and height can all be expressed in any valid CSS units,
-relative to any ancestor in the accessibility tree.
-
-```js
-virtualNode.offsetLeft = "30px";
-virtualNode.offsetTop = "20px";
-virtualNode.offsetWidth = "400px";
-virtualNode.offsetHeight = "300px";
-virtualNode.offsetParent = document.body.accessibleNode;
-```
-
-If offsetParent is left unset, the coordinates are interpreted relative to
-the accessible node's parent.
-
-To make a node focusable, the `focusable` attribute can be set. This is
-similar to setting tabIndex=-1 on a DOM element.
-
-```js
-virtualNode.focusable = true;
-```
-
-Virtual accessible nodes are not focusable by default.
-
-Finally, to focus an accessible node, call its focus() method.
-
-```js
-virtualNode.focus();
-```
-
-When a virtual accessible node is focused, input focus in the DOM is
-unchanged. The focused accessible node is reported to assistive technology
-and other accessibility API clients, but no DOM events are fired and
-document.activeElement is unchanged.
-
-When the focused DOM element changes, accessible focus follows it:
-the DOM element's associated accessible node gets focused.
-
-### Phase 4: Full Introspection of an Accessibility Tree
-
-The **Computed Accessibility Tree** API will allow authors to access
-the full computed accessibility tree -
-all computed properties for the accessibility node associated with each DOM element,
-plus the ability to walk the computed tree structure including virtual nodes.
-
-This will make it possible to:
-  * write any programmatic test which asserts anything
-    about the semantic properties of an element or a page.
-  * build a reliable browser-based assistive technology -
-    for example, a browser extension which uses the accessibility tree
-    to implement a screen reader, screen magnifier, or other assistive functionality;
-    or an in-page tool.
-  * detect whether an accessibility property
-    has been successfully applied
-    (via ARIA or otherwise)
-    to an element -
-    for example, to detect whether a browser has implemented a particular version of ARIA.
-  * do any kind of console-based debugging/checking of accessibility tree issues.
-  * react to accessibility tree state,
-    for example, detecting the exposed role of an element
-    and modifying the accessible help text to suit.
-
-#### Why is accessing the computed properties being addressed last?
-
-**Consistency**
-Currently, the accessibility tree is not standardized between browsers:
-Each implements accessibility tree computation slightly differently.
-In order for this API to be useful,
-it needs to work consistently across browsers,
-so that developers don't need to write special case code for each.
-
-We want to take the appropriate time to ensure we can agree
-on the details for how the tree should be computed
-and represented.
-
-**Performance**
-Computing the value of many accessible properties requires layout.
-Allowing web authors to query the computed value of an accessible property
-synchronously via a simple property access
-would introduce confusing performance bottlenecks.
-
-We will likely want to create an asynchronous mechanism for this reason,
-meaning that it will not be part of the `accessibleNode` interface.
-
-**User experience**
-Compared to the previous three phases,
-accessing the computed accessibility tree will have the least direct impact on users.
-In the spirit of the [Priority of Constituencies](https://www.w3.org/TR/html-design-principles/#priority-of-constituencies),
-it makes sense to tackle this work last.
-
-### Phases: Summary
-
-![All phases of the AOM shown on the flow chart](images/DOM-a11y-tree-AOM.png)
-
-* Phase 1, Modifying Accessible Properties,
-  will allow *setting* accessible properties for a DOM element,
-  including accessible relationships.
-* Phase 2, Accessible Actions,
-  will allow *reacting* to user actions from assistive technology.
-* Phase 3, Virtual Accessibility Nodes,
-  will allow the creation of accessibility nodes which are not associated with DOM elements.
-* Phase 4, Computed Accessibility Tree,
-  will allow *reading* the computed accessible properties for accessibility nodes,
-  whether associated with DOM elements or virtual,
-  and walking the computed accessibility tree.
-
-### Audience for the proposed API
-
-This API is will be primarily of interest to
-the relatively small number of developers who create and maintain
-the JavaScript frameworks and widget libraries that power the vast majority of web apps.
-Accessibility is a key goal of most of these frameworks and libraries,
-as they need to be usable in as broad a variety of contexts as possible.
-A low-level API would allow them to work around bugs and limitations
-and provide a clean high-level interface that "just works" for the developers who use their components.
-
-This API is also aimed at developers of large flagship web apps that
-push the boundaries of the web platform. These apps tend to have large
-development teams who look for unique opportunities to improve performance
-using low-level APIs like Canvas. These development teams have the
-resources to make accessibility a priority too, but existing APIs make it
-very cumbersome.
-
-## Next Steps
-
-The Accessibility Object Model development is led by a team of editors
-that represent several major browser vendors.
-
-An early draft of the spec for Accessible Properties is available here:
-
-https://wicg.github.io/aom/spec/
-
-The spec has several rough edges. Please refer to this explainer to understand
-the motivation, reasoning, and design tradeoffs. The spec will continue to
-evolve as we clarify the ideas and work out corner cases.
-
-Issues can be filed on GitHub:
-
-https://github.com/WICG/aom/issues
-
-### Incubation
-
-We intend to continue development of this spec as part of the
-[Web Platform Incubator Community Group (WICG)](https://www.w3.org/community/wicg/).
-Over time it may move into its own community group.
-
-Our intent is for this group's work to be almost entirely orthogonal to the
-current work of the [Web Accessibility Initiative](https://www.w3.org/WAI/)
-groups such as [ARIA](https://www.w3.org/TR/wai-aria/). While ARIA defines
-structural markup and semantics for accessibility properties on the web,
-often requiring coordination with assistive technology vendors and native platform
-APIs, the AOM simply provides a parallel JavaScript API that provides
-more low-level control for developers and fills in gaps in the web platform,
-but without introducing any new semantics.
-
-## Additional thanks
-
-Many thanks for valuable feedback, advice, and tools from:
-
-* Alex Russell
-* Bogdan Brinza
-* Chris Fleizach
-* Cynthia Shelley
-* David Bolter
-* Domenic Denicola
-* Ian Hickson
-* Joanmarie Diggs
-* Marcos Caceres
-* Nan Wang
-* Robin Berjon
-* Tess O'Connor
-
-Bogdan Brinza and Cynthia Shelley of Microsoft were credited as authors of an
-earlier draft of this spec but are no longer actively participating.
-
 ## Appendix: `AccessibleNode` naming
 
 We have chosen the name `AccessibleNode` for the class representing one
-node in the accessibility tree as exposed by the Accessibility Object Model,
-and `accessibleNode` as the accessor for the accessible node from a
-DOM element.
+node in the virtual accessibility tree.
 
 In choosing this name, we have tried to pick a balance between brevity,
 clarity, and generality.
 
 * Brevity: The name should be as short as possible.
 * Clarity: The name should reflect the function of the API,
-  without using opaque abbreviations or contractions -
-  the purpose of the property on Element should be possible to
-  guess if a developer encounters it while debugging.
+  without using opaque abbreviations or contractions.
 * Generality: The name should not be too narrow and limit the scope of the spec.
 
 Below we've collected all of the serious names that have been proposed
